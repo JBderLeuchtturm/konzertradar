@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0d0c11" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="description" content="Konzertradar – Konzerte und Vorverkäufe passend zu deinem Musikgeschmack, in deiner Nähe und dort, wo sich die Reise lohnt." />
+  <title>Konzertradar</title>
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="wrap top-inner">
+      <a class="brand" href="#feed" data-view="feed" aria-label="Konzertradar – Startseite">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-text">Konzert<b>radar</b></span>
+      </a>
+      <nav class="nav" aria-label="Bereiche">
+        <a href="#feed" data-view="feed">Konzerte</a>
+        <a href="#artists" data-view="artists">Künstler</a>
+        <a href="#settings" data-view="settings" aria-label="Einstellungen"><span class="lbl">Einstellungen</span><svg class="gear" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3.3h-4l-.4 2.6a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.4 7.4 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg></a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="app" class="wrap" aria-live="polite"></main>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <footer class="foot wrap">
+    <p>Konzertdaten: Ticketmaster · Geschmack: stats.fm (aus deinem Spotify) · wird jeden Morgen automatisch aktualisiert.
+      Merkliste und eigene Einstellungen bleiben auf deinem Gerät.</p>
+  </footer>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

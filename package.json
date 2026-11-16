@@ -1,0 +1,11 @@
+{
+  "name": "konzertradar",
+  "private": true,
+  "type": "module",
+  "description": "Konzerte und Vorverkaeufe passend zum eigenen Musikgeschmack (stats.fm + Ticketmaster).",
+  "scripts": {
+    "update": "node scripts/update.mjs",
+    "preview": "python3 -m http.server 8080 --directory _site"
+  },
+  "engines": { "node": ">=20" }
+}

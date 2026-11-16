@@ -1,0 +1,10 @@
+{
+  "statsfm": "janniktheninja",
+  "home": { "name": "Idar-Oberstein", "lat": 49.7117, "lon": 7.3127, "radius": 150 },
+  "places": [],
+  "travelKm": 1500,
+  "monthsAhead": 12,
+  "maxArtists": 60,
+  "artists": [],
+  "notify": true
+}
