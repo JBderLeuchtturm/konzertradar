@@ -13,10 +13,11 @@ in der GitHub-App ankommt).
 ## Was die Seite zeigt
 
 - **In deiner Nähe** – deine Künstler im Umkreis deiner Orte
-  (Standard: Idar-Oberstein, 150 km – Frankfurt, Mainz, Mannheim, Saarbrücken,
-  Luxemburg und Köln liegen darin).
-- **Lohnt die Reise** – deine Künstler weiter weg (Standard bis 1.500 km, also
-  auch Göteborg, Stockholm, London, Amsterdam …), pro Künstler zuerst die
+  (eingestellt: Idar-Oberstein, 300 km – von Köln und Düsseldorf über Frankfurt
+  bis Stuttgart, dazu Luxemburg und Straßburg).
+- **Deutschland** – deine Künstler sonst irgendwo in Deutschland.
+- **Ausland** – deine Künstler im Ausland, bis 2.500 km weit (ganz Europa –
+  Göteborg, Stockholm, London, Barcelona …), pro Künstler zuerst die
   nächstgelegenen Termine.
 - **Entdecken** – andere Konzerte in der Nähe, die zu deinen Genres passen.
 - **Neu**, **Vorverkauf startet** (inkl. Presales), **Merkliste** und
@@ -51,7 +52,7 @@ erlauben bzw. unter <https://github.com/settings/notifications> E-Mails für
 | `statsfm` | dein stats.fm-Name oder Profil-Link |
 | `home` | Zuhause mit `lat`, `lon` und `radius` in km |
 | `places` | weitere Orte, z. B. `{ "name": "Göteborg", "radius": 50 }` – ohne Koordinaten werden sie automatisch gesucht |
-| `travelKm` | wie weit weg deine Künstler noch angezeigt werden |
+| `travelKm` | bis wie weit weg Konzerte im Ausland angezeigt werden |
 | `monthsAhead` | wie weit im Voraus gesucht wird |
 | `maxArtists` | wie viele deiner Top-Künstler einzeln gesucht werden |
 | `artists` | Künstler, die immer dabei sein sollen, z. B. `["Swedish House Mafia"]` |

@@ -44,7 +44,7 @@ const DEFAULTS = {
   statsfm: '',
   home: { name: 'Idar-Oberstein', lat: 49.7117, lon: 7.3127, radius: 150 },
   places: [],
-  travelKm: 1500,
+  travelKm: 2500,
   monthsAhead: 12,
   maxArtists: 60,
   artists: [],
@@ -289,27 +289,38 @@ async function searchTicketmaster(toQuery, places) {
     }
   }
 
+  // Umgebung in Drei-Monats-Stücken: Ticketmaster liefert höchstens 1000 Treffer pro
+  // Suche, und bei großem Umkreis wären sonst nur die nächsten Wochen dabei.
+  const start = new Date();
+  const end = addMonths(start, config.monthsAhead);
   for (const place of places) {
-    for (let page = 0; page < 3; page += 1) {
-      try {
-        const result = await tmEvents({
-          geoPoint: geohash(place.lat, place.lon, 9),
-          radius: String(Math.round(place.radius)),
-          unit: 'km',
-          classificationName: 'music',
-          size: '200',
-          page: String(page),
-        });
-        worked = true;
-        for (const ev of result.events) raw.set(ev.id, ev);
-        log(`  Umgebung ${place.name}, Seite ${page + 1}: ${result.events.length} Konzerte`);
-        if (page + 1 >= (Number(result.page.totalPages) || 1)) break;
-      } catch (error) {
-        if (error.fatal) throw error;
-        warn(`Umgebung ${place.name}: ${error.message}`);
-        break;
+    let count = 0;
+    for (let from = new Date(start); from < end; from = addMonths(from, 3)) {
+      const to = new Date(Math.min(addMonths(from, 3).getTime(), end.getTime()));
+      for (let page = 0; page < 3; page += 1) {
+        try {
+          const result = await tmEvents({
+            geoPoint: geohash(place.lat, place.lon, 9),
+            radius: String(Math.round(place.radius)),
+            unit: 'km',
+            classificationName: 'music',
+            size: '200',
+            page: String(page),
+            startDateTime: isoNoMs(from),
+            endDateTime: isoNoMs(to),
+          });
+          worked = true;
+          for (const ev of result.events) raw.set(ev.id, ev);
+          count += result.events.length;
+          if (page + 1 >= (Number(result.page.totalPages) || 1)) break;
+        } catch (error) {
+          if (error.fatal) throw error;
+          warn(`Umgebung ${place.name}: ${error.message}`);
+          break;
+        }
       }
     }
+    log(`  Umgebung ${place.name} (${place.radius} km): ${count} Konzerte`);
   }
   if (!worked && (toQuery.length || places.length)) throw new Error('Ticketmaster hat auf keine Anfrage geantwortet.');
   return [...raw.values()].map(toEvent).filter(Boolean);
@@ -350,7 +361,13 @@ async function eventimProducts(params) {
       error.fatal = true;
       throw error;
     }
-    if (!response.ok) throw new Error(`Eventim: Fehler ${response.status}`);
+    if (!response.ok) {
+      const text = (await response.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 300);
+      const error = new Error(`Eventim: Fehler ${response.status}`);
+      error.status = response.status;
+      error.detail = text;
+      throw error;
+    }
     const json = await response.json();
     const products = Array.isArray(json.products) ? json.products : [];
     if (!eventimSampleLogged && products.length) {
@@ -371,6 +388,42 @@ function citiesNear(places) {
   return [...names];
 }
 
+/** Alle Seiten einer Eventim-Suche, höchstens `maxPages`. */
+async function eventimAll(params, maxPages) {
+  const products = [];
+  for (let page = 1; page <= maxPages; page += 1) {
+    const result = await eventimProducts({ ...params, page: String(page) });
+    products.push(...result.products);
+    if (page >= result.totalPages || !result.products.length) break;
+  }
+  return products;
+}
+
+const unknownCities = new Set();
+let cityErrorLogged = false;
+
+/**
+ * Städte-Suche. Lehnt Eventim eine Anfrage ab (400), liegt das meist an einem
+ * Stadtnamen, den Eventim nicht kennt – dann wird halbiert, bis er gefunden ist,
+ * und er bleibt für den Rest des Laufs draußen.
+ */
+async function eventimCities(chunk, params) {
+  const names = chunk.filter((n) => !unknownCities.has(n));
+  if (!names.length) return [];
+  try {
+    return await eventimAll({ ...params, city_names: names }, 2);
+  } catch (error) {
+    if (error.status !== 400) throw error;
+    if (!cityErrorLogged) {
+      cityErrorLogged = true;
+      log(`  Eventim lehnt eine Städte-Suche ab: ${error.detail || error.message}`);
+    }
+    if (names.length === 1) { unknownCities.add(names[0]); return []; }
+    const mid = Math.ceil(names.length / 2);
+    return [...await eventimCities(names.slice(0, mid), params), ...await eventimCities(names.slice(mid), params)];
+  }
+}
+
 async function searchEventim(toQuery, places) {
   const raw = new Map();
   let worked = false;
@@ -382,7 +435,9 @@ async function searchEventim(toQuery, places) {
 
   for (const [i, artist] of toQuery.entries()) {
     try {
-      const { products } = await eventimProducts({ search_term: artist.name, ...range });
+      // Die Suche ist unscharf ("Hans Zimmer" findet auch jede Tribute-Show). Bei
+      // vollen 50 Treffern deshalb weiterblättern, damit echte Termine nicht untergehen.
+      const products = await eventimAll({ search_term: artist.name, ...range }, 3);
       worked = true;
       for (const p of products) raw.set(p.productId, p);
       if (products.length) log(`  ${String(i + 1).padStart(3)}. ${artist.name}: ${products.length} Treffer`);
@@ -397,29 +452,27 @@ async function searchEventim(toQuery, places) {
   // Umgebung: alle Konzerte in den Städten rund um deine Orte, in Zwei-Monats-Stücken,
   // weil Eventim pro Suche nur begrenzt viele Treffer liefert.
   const cities = citiesNear(places);
-  if (cities.length) log(`  Eventim-Umgebung: ${cities.length} Städte`);
+  let near = 0;
   for (let from = new Date(start); from < end; from = addMonths(from, 2)) {
     const to = new Date(Math.min(addMonths(from, 2).getTime() - 864e5, end.getTime()));
-    for (let c = 0; c < cities.length; c += 15) {
-      const chunk = cities.slice(c, c + 15);
-      for (let page = 1; page <= 2; page += 1) {
-        try {
-          const result = await eventimProducts({
-            city_names: chunk, categories: ['Konzerte', 'Festivals'],
-            date_from: todayISO(from), date_to: todayISO(to), page: String(page),
-          });
-          worked = true;
-          for (const p of result.products) raw.set(p.productId, p);
-          if (page >= result.totalPages) break;
-        } catch (error) {
-          if (error.fatal) throw error;
-          failed += 1;
-          firstError ||= error.message;
-          break;
-        }
+    for (let c = 0; c < cities.length; c += 12) {
+      try {
+        const products = await eventimCities(cities.slice(c, c + 12), {
+          categories: 'Konzerte', date_from: todayISO(from), date_to: todayISO(to),
+        });
+        worked = true;
+        near += products.length;
+        for (const p of products) raw.set(p.productId, p);
+      } catch (error) {
+        if (error.fatal) throw error;
+        failed += 1;
+        firstError ||= error.message;
       }
     }
   }
+  if (cities.length) log(`  Eventim-Umgebung: ${cities.length - unknownCities.size} Städte, ${near} Konzerte`);
+  if (unknownCities.size) log(`  Eventim kennt diese Städte nicht: ${[...unknownCities].join(', ')}`);
+  if (unknownCities.size && unknownCities.size === cities.length) warn('Eventim lehnt die Städte-Suche ab – „Entdecken“ hat nur Ticketmaster.');
   if (failed) warn(`Eventim: ${failed} Suchen fehlgeschlagen (${firstError}).`);
   if (!worked && (toQuery.length || cities.length)) throw new Error('Eventim hat auf keine Anfrage geantwortet.');
   return [...raw.values()].map(fromEventim).filter(Boolean);
@@ -445,7 +498,8 @@ function line(ev) {
 function digest(list, site) {
   const groups = [
     ['near', 'In deiner Nähe'],
-    ['travel', 'Lohnt die Reise'],
+    ['germany', 'Deutschland'],
+    ['abroad', 'Ausland'],
     ['discover', 'Entdecken'],
   ];
   let body = '';
@@ -597,7 +651,7 @@ async function main() {
   // dasselbe Konzert zwei Wochen lang jeden Morgen wieder.
   const fresh = list.filter((e) => e.firstSeen === now && now > baseline && (e.section !== 'discover' || e.disc.score >= 0.7));
   const count = (s) => list.filter((e) => e.section === s).length;
-  const summary = `## Konzertradar\n\n${list.length} Konzerte für dich – ${count('near')} in der Nähe, ${count('travel')} weiter weg, ${count('discover')} zum Entdecken. ${fresh.length} davon neu.\n${fresh.length ? digest(fresh, site) : ''}${errors.length ? `\n**Hinweise**\n${errors.map((e) => `- ${e}`).join('\n')}\n` : ''}`;
+  const summary = `## Konzertradar\n\n${list.length} Konzerte für dich – ${count('near')} in der Nähe, ${count('germany')} sonst in Deutschland, ${count('abroad')} im Ausland, ${count('discover')} zum Entdecken. ${fresh.length} davon neu.\n${fresh.length ? digest(fresh, site) : ''}${errors.length ? `\n**Hinweise**\n${errors.map((e) => `- ${e}`).join('\n')}\n` : ''}`;
   log(`\n${summary}`);
   if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, summary);
 

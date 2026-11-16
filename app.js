@@ -148,8 +148,8 @@ function settings() {
   return {
     home: s.home || { name: 'Zuhause', lat: 0, lon: 0, radius: 150 },
     places: s.places || [],
-    travelKm: prefs.travelKm ?? s.travelKm ?? 1500,
-    configTravelKm: s.travelKm ?? 1500,
+    travelKm: prefs.travelKm ?? s.travelKm ?? 2500,
+    configTravelKm: s.travelKm ?? 2500,
   };
 }
 
@@ -312,30 +312,41 @@ function emptyNote(text) {
   return `<div class="empty"><p style="margin:0">${text}</p></div>`;
 }
 
-function renderForYou(list) {
-  const s = settings();
-  const near = list.filter((e) => e.section === 'near').sort((a, b) => b.score - a.score || byDate(a, b));
-  const discover = list.filter((e) => e.section === 'discover').sort((a, b) => b.score - a.score || byDate(a, b));
+function groupByArtist(list) {
   const groups = new Map();
-  for (const ev of list.filter((e) => e.section === 'travel')) {
+  for (const ev of list) {
     const g = groups.get(ev.artist.key) || { artist: ev.artist, events: [] };
     g.events.push(ev);
     groups.set(ev.artist.key, g);
   }
-  const trips = [...groups.values()].sort((a, b) => b.artist.score - a.artist.score);
+  return [...groups.values()].sort((a, b) => b.artist.score - a.artist.score);
+}
+
+function renderForYou(list) {
+  const s = settings();
+  const near = list.filter((e) => e.section === 'near').sort((a, b) => b.score - a.score || byDate(a, b));
+  const germany = groupByArtist(list.filter((e) => e.section === 'germany'));
+  const abroad = groupByArtist(list.filter((e) => e.section === 'abroad'));
+  const discover = list.filter((e) => e.section === 'discover').sort((a, b) => b.score - a.score || byDate(a, b));
   const placesText = [s.home, ...s.places].map((p) => `${esc(p.name)} (${Math.round(p.radius)} km)`).join(', ');
 
   let html = sectionHead('In deiner Nähe', near.length, `Deine Künstler rund um ${placesText}.`);
   const nNear = state.expand.near ? near.length : 12;
   html += near.length
     ? `<div class="grid">${near.slice(0, nNear).map(eventCard).join('')}</div>${moreButton('near', nNear, near.length)}`
-    : emptyNote('Gerade keine angekündigten Konzerte deiner Künstler in der Nähe. Weiter unten findest du, was sich lohnt.');
+    : emptyNote('Gerade keine angekündigten Konzerte deiner Künstler in der Nähe.');
 
-  html += sectionHead('Lohnt die Reise', trips.length, `Deine Künstler weiter weg – bis ${s.travelKm.toLocaleString('de-DE')} km von ${esc(s.home.name)}. Pro Künstler zuerst die Termine, die am nächsten liegen.`);
-  const nTrips = state.expand.travel ? trips.length : 10;
-  html += trips.length
-    ? `<div class="grid">${trips.slice(0, nTrips).map(tripCard).join('')}</div>${moreButton('travel', nTrips, trips.length)}`
-    : emptyNote('Keine Termine deiner Künstler im Reiseumkreis gefunden.');
+  html += sectionHead('Deutschland', germany.length, 'Deine Künstler sonst irgendwo in Deutschland. Pro Künstler zuerst die Termine, die am nächsten liegen.');
+  const nDe = state.expand.germany ? germany.length : 10;
+  html += germany.length
+    ? `<div class="grid">${germany.slice(0, nDe).map(tripCard).join('')}</div>${moreButton('germany', nDe, germany.length)}`
+    : emptyNote('Keine weiteren Termine deiner Künstler in Deutschland.');
+
+  html += sectionHead('Ausland', abroad.length, `Deine Künstler im Ausland – bis ${s.travelKm.toLocaleString('de-DE')} km von ${esc(s.home.name)}.`);
+  const nAb = state.expand.abroad ? abroad.length : 10;
+  html += abroad.length
+    ? `<div class="grid">${abroad.slice(0, nAb).map(tripCard).join('')}</div>${moreButton('abroad', nAb, abroad.length)}`
+    : emptyNote('Keine Termine deiner Künstler im Ausland gefunden.');
 
   html += sectionHead('Entdecken', discover.length, 'Andere Konzerte in deiner Nähe, die zu deinen Genres passen.');
   const nDisc = state.expand.discover ? discover.length : 12;
@@ -488,8 +499,8 @@ function renderArtists() {
   const countBy = new Map();
   for (const ev of classified()) {
     if (!ev.artist) continue;
-    const c = countBy.get(ev.artist.key) || { near: 0, travel: 0 };
-    c[ev.section === 'near' ? 'near' : 'travel'] += 1;
+    const c = countBy.get(ev.artist.key) || { near: 0, germany: 0, abroad: 0 };
+    c[ev.section] = (c[ev.section] || 0) + 1;
     countBy.set(ev.artist.key, c);
   }
   const artists = d.artists || [];
@@ -504,7 +515,7 @@ function renderArtists() {
   html += `<ul class="artists">${artists.slice(0, 300).map((a, i) => {
     const c = countBy.get(a.key);
     const isHidden = hidden.has(a.key);
-    const found = c ? [c.near ? `${c.near} in der Nähe` : '', c.travel ? `${c.travel} weiter weg` : ''].filter(Boolean).join(', ') : '';
+    const found = c ? [c.near ? `${c.near} in der Nähe` : '', c.germany ? `${c.germany} in Deutschland` : '', c.abroad ? `${c.abroad} im Ausland` : ''].filter(Boolean).join(', ') : '';
     return `<li class="artist${isHidden ? ' hidden-artist' : ''}">
       <span class="rank">${i + 1}</span>
       ${a.image ? `<img src="${esc(a.image)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.visibility='hidden'" />` : '<span class="ph"></span>'}
@@ -552,8 +563,8 @@ function renderSettings() {
     </section>
 
     <section class="panel">
-      <h2 class="display">Lohnt die Reise</h2>
-      <div class="field"><label for="s-travel">Deine Künstler auch weiter weg zeigen – bis</label>
+      <h2 class="display">Ausland</h2>
+      <div class="field"><label for="s-travel">Deine Künstler im Ausland zeigen – bis</label>
         <div class="range"><input type="range" id="s-travel" min="200" max="5000" step="100" value="${s.travelKm}" data-range="travelKm" />
         <output>${s.travelKm.toLocaleString('de-DE')} km</output></div>
         <span class="hint">Göteborg liegt rund 1.050 km von Idar-Oberstein entfernt, Stockholm 1.250 km, London 650 km, Barcelona 1.000 km.

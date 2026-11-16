@@ -251,8 +251,10 @@ export function fromEventim(p) {
     status: /sold ?out|ausverkauft/i.test(status) ? 'offsale' : 'onsale',
     venue: loc.name || '',
     city: loc.city || '',
-    country: code.toUpperCase(),
-    countryName: code ? countryName({ countryCode: code.toUpperCase() }) : (typeof loc.country === 'string' ? loc.country : ''),
+    // Eventim nennt kein Land – innerhalb Deutschlands ergibt es sich aus den Koordinaten.
+    country: code ? code.toUpperCase() : Number.isFinite(lat) && inGermany(lat, lon) ? 'DE' : '',
+    countryName: code ? countryName({ countryCode: code.toUpperCase() })
+      : Number.isFinite(lat) && inGermany(lat, lon) ? 'Deutschland' : (typeof loc.country === 'string' ? loc.country : ''),
     lat: Number.isFinite(lat) && loc.geoLocation ? lat : null,
     lon: Number.isFinite(lon) && loc.geoLocation ? lon : null,
     segment: music ? 'Music' : cats[0] || '',
@@ -285,16 +287,54 @@ export function isNew(ev, data, now = Date.now()) {
   return !!ev.firstSeen && data.baseline != null && ev.firstSeen > data.baseline && now - ev.firstSeen < NEW_FOR;
 }
 
+/* ================================================================ Deutschland */
+
+// Grob vereinfachte Grenze Deutschlands (Länge, Breite). Auf 10–20 km genau –
+// reicht, um Konzerte im Ausland von denen in Deutschland zu trennen.
+const GERMANY = [
+  [7.20, 53.30], [7.05, 52.85], [7.05, 52.40], [7.05, 52.25], [6.75, 52.05], [6.70, 51.90], [6.10, 51.85],
+  [5.95, 51.75], [6.22, 51.50], [6.22, 51.36], [6.08, 51.20], [5.90, 51.05], [6.00, 50.75], [6.20, 50.60],
+  [6.40, 50.35], [6.10, 50.15], [6.40, 49.85], [6.50, 49.70], [6.37, 49.47], [6.55, 49.42], [6.75, 49.17],
+  [7.00, 49.12], [7.30, 49.12], [7.65, 49.05], [7.95, 49.02], [8.23, 48.97], [7.80, 48.58], [7.58, 48.10],
+  [7.55, 47.60], [7.70, 47.55], [8.20, 47.60], [8.45, 47.58], [8.90, 47.65], [9.20, 47.66], [9.60, 47.53],
+  [9.95, 47.55], [10.15, 47.30], [10.45, 47.55], [10.95, 47.40], [11.35, 47.45], [12.20, 47.60], [12.80, 47.55],
+  [13.05, 47.47], [12.95, 47.75], [13.00, 48.10], [13.40, 48.38], [13.75, 48.52], [13.85, 48.77], [13.40, 49.05],
+  [12.85, 49.33], [12.45, 49.70], [12.30, 50.05], [12.10, 50.25], [12.50, 50.40], [12.95, 50.42], [13.50, 50.65],
+  [14.00, 50.85], [14.30, 51.00], [14.80, 50.85], [15.06, 51.25], [14.75, 51.60], [14.72, 52.05], [14.55, 52.40],
+  [14.15, 52.85], [14.40, 53.25], [14.25, 53.75], [14.25, 53.95], [13.40, 54.70], [12.30, 54.45], [11.00, 54.55],
+  [10.90, 54.00], [10.30, 54.40], [10.00, 54.80], [9.40, 54.85], [8.60, 54.92], [8.30, 55.05], [8.40, 54.60],
+  [8.60, 54.30], [8.85, 53.85], [8.00, 53.70], [7.00, 53.75], [6.90, 53.55],
+];
+
+export function inGermany(lat, lon) {
+  let inside = false;
+  for (let i = 0, j = GERMANY.length - 1; i < GERMANY.length; j = i, i += 1) {
+    const [xi, yi] = GERMANY[i];
+    const [xj, yj] = GERMANY[j];
+    if ((yi > lat) !== (yj > lat) && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+function isGermany(ev) {
+  if (ev.country) return ev.country === 'DE';
+  if (ev.lat != null && ev.lon != null) return inGermany(ev.lat, ev.lon);
+  return ev.source === 'Eventim';
+}
+
 /* ================================================================ Einordnen */
+
+export const SECTIONS = ['near', 'germany', 'abroad', 'discover'];
 
 /**
  * Ordnet jedes Konzert ein:
  *   near     – einer deiner Künstler im Umkreis eines deiner Orte
- *   travel   – einer deiner Künstler weiter weg, bis travelKm von zuhause
+ *   germany  – einer deiner Künstler sonst irgendwo in Deutschland
+ *   abroad   – einer deiner Künstler im Ausland, bis travelKm von zuhause
  *   discover – anderes Konzert in der Nähe, das zu deinen Genres passt
  * Alles andere fällt raus. Doppelte Einträge (VIP-Pakete) werden zusammengefasst.
  */
-export function classify(data, { home, places = [], travelKm = 1500, genres = null, hidden = new Set(), now = Date.now() } = {}) {
+export function classify(data, { home, places = [], travelKm = 2500, genres = null, hidden = new Set(), now = Date.now() } = {}) {
   const byId = new Map();
   const byName = new Map();
   for (const a of data.artists || []) {
@@ -339,8 +379,11 @@ export function classify(data, { home, places = [], travelKm = 1500, genres = nu
       if (near) {
         section = 'near';
         score = 60 + 40 * artist.score - (support ? 10 : 0);
+      } else if (isGermany(ev)) {
+        section = 'germany';
+        score = 35 + 55 * artist.score - Math.min(10, (dHome || 0) / 100) - (support ? 10 : 0);
       } else if (dHome == null || dHome <= travelKm) {
-        section = 'travel';
+        section = 'abroad';
         score = 25 + 55 * artist.score - Math.min(15, (dHome || 0) / 150) - (support ? 10 : 0);
       }
     } else if (near && /music|musik/i.test(ev.segment || 'music') && !TRIBUTE.test(ev.name)) {

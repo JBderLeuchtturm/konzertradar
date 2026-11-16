@@ -153,7 +153,7 @@ export function buildDemoData() {
     ts: now - 3 * 3600e3,
     baseline,
     source: { statsfm: { name: 'beispiel', url: 'https://stats.fm/' } },
-    settings: { home: { name: 'Idar-Oberstein', lat: 49.7117, lon: 7.3127, radius: 150 }, places: [], travelKm: 1500, monthsAhead: 12, maxArtists: 60 },
+    settings: { home: { name: 'Idar-Oberstein', lat: 49.7117, lon: 7.3127, radius: 150 }, places: [], travelKm: 2500, monthsAhead: 12, maxArtists: 60 },
     artists,
     events,
     errors: [],
