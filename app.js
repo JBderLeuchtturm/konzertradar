@@ -6,7 +6,7 @@
  * gemerkt und in den Kalender gelegt. Es gibt keine Schlüssel im Browser.
  */
 
-import { BUCKETS, buildProfile, classify, norm, saleInfo, todayISO } from './core.js';
+import { BUCKETS, buildProfile, classify, linksOf, norm, saleInfo, todayISO } from './core.js';
 
 const LS = {
   prefs: 'konzertradar.prefs',
@@ -201,8 +201,8 @@ function downloadIcs(ev) {
     ...icsDate(ev),
     `SUMMARY:${icsEscape(title)}`,
     `LOCATION:${icsEscape([ev.venue, ev.city, ev.countryName].filter(Boolean).join(', '))}`,
-    ev.url ? `URL:${ev.url}` : null,
-    `DESCRIPTION:${icsEscape(ev.url ? `Tickets: ${ev.url}` : 'Gefunden mit dem Konzertradar')}`,
+    linksOf(ev)[0] ? `URL:${linksOf(ev)[0].url}` : null,
+    `DESCRIPTION:${icsEscape(linksOf(ev).length ? linksOf(ev).map((l) => `Tickets (${l.source}): ${l.url}`).join('\n') : 'Gefunden mit dem Konzertradar')}`,
     'END:VEVENT', 'END:VCALENDAR',
   ].filter(Boolean);
   const blob = new Blob([lines.join('\r\n')], { type: 'text/calendar;charset=utf-8' });
@@ -244,9 +244,11 @@ function renderStatus() {
   const fresh = list.filter((e) => e.isNew).length;
   const sfm = d.source?.statsfm;
   const who = sfm ? ` · Geschmack von <a href="${esc(sfm.url)}" target="_blank" rel="noopener"><strong>stats.fm/${esc(sfm.name)}</strong></a>` : '';
+  const ok = (d.stats?.sources || []).filter((x) => x.ok).map((x) => x.name);
+  const from = ok.length ? ` · aus ${esc(ok.join(' + '))}` : '';
   const warn = d.errors?.length ? ` · <button class="linkbtn" data-act="errors" style="color:var(--amber)">${d.errors.length} Hinweis${d.errors.length === 1 ? '' : 'e'}</button>` : '';
   return `<div class="status" id="status">
-    <p>Stand <strong>${relTime(d.ts)}</strong>, wird jeden Morgen aktualisiert · ${list.length} Konzerte für dich${fresh ? ` · <strong style="color:var(--accent)">${fresh} neu</strong>` : ''}${who}${warn}</p>
+    <p>Stand <strong>${relTime(d.ts)}</strong>, wird jeden Morgen aktualisiert · ${list.length} Konzerte für dich${fresh ? ` · <strong style="color:var(--accent)">${fresh} neu</strong>` : ''}${from}${who}${warn}</p>
   </div>`;
 }
 
@@ -397,6 +399,22 @@ function saleText(ev) {
   return price ? `Tickets ab <b>${esc(price)}</b>` : 'Tickets beim Anbieter';
 }
 
+/** Ein Knopf pro Ticket-Anbieter; bei nur einem heißt er einfach „Tickets“. */
+function ticketButtons(ev) {
+  const links = linksOf(ev);
+  if (!links.length) return '';
+  return links.map((l, i) => `<a class="btn ${i === 0 ? 'primary ' : ''}small" href="${esc(l.url)}" target="_blank" rel="noopener"${links.length === 1 ? ` title="Tickets bei ${esc(l.source)}"` : ''}>${links.length === 1 ? `Tickets <span class="src">${esc(l.source)}</span>` : esc(l.source)}</a>`).join('');
+}
+
+function sourcesList(d) {
+  const sources = d.stats?.sources || [];
+  if (!sources.length) return '';
+  return `<ul class="places">${sources.map((s) => `<li><span><b>${esc(s.name)}</b> <span class="muted small">· ${s.ok
+    ? `${s.kept ?? s.found} Konzerte`
+    : s.reused ? 'ausgefallen – zeigt die Konzerte vom letzten Mal' : 'ausgefallen'}</span></span>
+    <span style="color:${s.ok ? 'var(--green)' : 'var(--red)'}">${s.ok ? '●' : '○'}</span></li>`).join('')}</ul>`;
+}
+
 function saveButton(ev, compact = false) {
   const on = !!saved[ev.id];
   const label = compact ? (on ? '★' : '☆') : (on ? '★ Gemerkt' : '☆ Merken');
@@ -426,7 +444,7 @@ function eventCard(ev) {
       <p class="ev-where">${place}${dist ? ` <span class="dist">· ${dist}</span>` : ''}</p>
       <p class="ev-sale">${ev.time ? `${esc(ev.time.slice(0, 5))} Uhr · ` : ''}${saleText(ev)}</p>
       <div class="ev-actions">
-        ${ev.url ? `<a class="btn primary small" href="${esc(ev.url)}" target="_blank" rel="noopener">Tickets</a>` : ''}
+        ${ticketButtons(ev)}
         ${saveButton(ev)}
         <button class="btn small ghost" data-act="ics" data-id="${esc(ev.id)}">In Kalender</button>
       </div>
@@ -454,7 +472,7 @@ function tripCard(group) {
         <span class="when">${esc(whenText(ev))}${ev.support ? ' <span class="muted small">(Support)</span>' : ''}</span>
         <span class="where">${esc([ev.city, ev.countryName].filter(Boolean).join(', '))} · ${esc(ev.venue)}${ev.dHome != null ? ` · ${Math.round(ev.dHome).toLocaleString('de-DE')} km` : ''}${extra}</span>
         <span class="acts">
-          ${ev.url ? `<a class="btn primary small" href="${esc(ev.url)}" target="_blank" rel="noopener">Tickets</a>` : ''}
+          ${ticketButtons(ev)}
           ${saveButton(ev, true)}
         </span>
       </li>`;
@@ -493,7 +511,7 @@ function renderArtists() {
       <div style="min-width:0">
         <div class="name">${esc(a.name)}</div>
         <div class="meta">${esc(a.why)}${a.genres?.length ? ` · ${esc(a.genres.slice(0, 3).join(', '))}` : ''}</div>
-        <div class="meta" style="color:${found ? 'var(--green)' : 'var(--faint)'}">${found ? `Konzerte: ${esc(found)}` : 'keine Konzerte bei Ticketmaster gefunden'}</div>
+        <div class="meta" style="color:${found ? 'var(--green)' : 'var(--faint)'}">${found ? `Konzerte: ${esc(found)}` : 'gerade keine Konzerte gefunden'}</div>
         <div class="bar"><span style="width:${Math.round(a.score * 100)}%"></span></div>
       </div>
       <div class="links">
@@ -523,6 +541,7 @@ function renderSettings() {
       <h2 class="display">Suchlauf</h2>
       <p class="muted small">Letzter Suchlauf ${relTime(d.ts)} (${new Date(d.ts).toLocaleString('de-DE')}). ${d.stats?.searched ?? 0} Künstler einzeln gesucht.
         ${sfm ? `Geschmack von <a href="${esc(sfm.url)}" target="_blank" rel="noopener">stats.fm/${esc(sfm.name)}</a>.` : 'Kein stats.fm-Profil verknüpft.'}</p>
+      ${sourcesList(d)}
       ${repo ? `<div class="row">
         <a class="btn primary" href="${repo.actions}" target="_blank" rel="noopener">Jetzt neu suchen</a>
         <a class="btn" href="${repo.config}" target="_blank" rel="noopener">Orte &amp; Künstler ändern</a>
@@ -596,7 +615,7 @@ function findEvent(id) {
 }
 
 function snapshot(ev) {
-  const keep = ['id', 'name', 'url', 'date', 'time', 'dateTime', 'status', 'venue', 'city', 'country', 'countryName', 'lat', 'lon', 'image', 'attractions', 'saleStart', 'presales', 'price', 'section', 'dHome', 'support'];
+  const keep = ['id', 'source', 'name', 'url', 'links', 'date', 'time', 'dateTime', 'status', 'venue', 'city', 'country', 'countryName', 'lat', 'lon', 'image', 'attractions', 'saleStart', 'presales', 'price', 'section', 'dHome', 'support'];
   const out = {};
   for (const k of keep) out[k] = ev[k];
   if (ev.artist) out.artist = { key: ev.artist.key, name: ev.artist.name, why: ev.artist.why, image: ev.artist.image, score: ev.artist.score };

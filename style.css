@@ -93,6 +93,7 @@ h1, h2, h3 { margin: 0; line-height: 1.1; }
 .btn:disabled { opacity: .5; cursor: default; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .btn.primary:hover { filter: brightness(1.08); }
+.btn .src { font-weight: 500; opacity: .75; font-size: 12px; }
 .btn.ghost { background: transparent; }
 .btn.small { min-height: 34px; padding: 6px 11px; font-size: 13px; }
 .btn.big { min-height: 50px; padding: 12px 22px; font-size: 16px; }

@@ -76,7 +76,7 @@ export function pickImage(images, target = 160) {
 export const BUCKETS = [
   ['Dance/Electronic', /house|techno|edm|electro|trance|dubstep|drum and bass|drum & bass|dnb|jungle|garage|dance|big room|hardstyle|bass music|future bass|idm|synthwave|disco|eurodance|melodic bass/],
   ['Hip-Hop/Rap', /hip ?-?hop|rap|trap|drill|grime|boom bap/],
-  ['Metal', /metal|metalcore|deathcore|djent|grindcore/],
+  ['Metal', /metal|metalcore|deathcore|djent|grindcore|hard & heavy|hard and heavy/],
   ['Rock', /rock|punk|grunge|stoner|shoegaze|post-hardcore/],
   ['Alternative', /indie|alternative|emo|lo-fi|bedroom|new wave/],
   ['Pop', /pop|boy band|girl group/],
@@ -154,7 +154,7 @@ export function discoveryScore(ev, profile) {
 
 /* ================================================================ Ticketmaster-Daten */
 
-export const JUNK = /\b(parking|parken|parkplatz|parkschein|park ?ticket|parkhaus|shuttle|bus ?transfer|gutschein|voucher|gift ?card|upgrade|fast ?lane|locker|schlie(ss|ß)fach|camping ?(ticket|pass)?|merch)\b/i;
+export const JUNK = /\b(parking|parken|parkplatz|parkschein|park ?ticket|parkhaus|shuttle|bus ?transfer|gutschein|voucher|gift ?card|upgrade|fast ?lane|locker|schlie(ss|ß)fach|camping ?(ticket|pass)?|merch|busreise|busfahrt|hotel ?(\+|&|und) ?ticket|ticket ?(\+|&|und) ?hotel|hotelpaket|reisepaket)\b/i;
 export const PACKAGE = /\b(vip|package|paket|premium|hospitality|meet ?(and|&) ?greet|platinum|lounge)\b/i;
 export const TRIBUTE = /tribute|hommage|cover ?band|plays the music of|the music of|a tribute to|revival/i;
 
@@ -190,6 +190,7 @@ export function toEvent(raw) {
   const start = raw.dates?.start || {};
   return {
     id: raw.id,
+    source: 'Ticketmaster',
     name: raw.name,
     url: raw.url || null,
     date: start.localDate || null,
@@ -217,6 +218,58 @@ export function toEvent(raw) {
       .map((p) => ({ name: p.name || 'Presale', start: p.startDateTime, end: p.endDateTime || null })),
     price: price && Number.isFinite(Number(price.min)) ? { min: Number(price.min), max: Number(price.max), currency: price.currency } : null,
   };
+}
+
+/**
+ * Eventim-Produkt (öffentliche Suchschnittstelle von eventim.de) in dieselbe
+ * Form bringen wie Ticketmaster-Konzerte. Gibt null für Abgesagtes und Reisepakete.
+ */
+export function fromEventim(p) {
+  const live = p.typeAttributes?.liveEntertainment || {};
+  const loc = live.location || {};
+  const start = live.startDate || p.startDate || null;
+  const status = String(p.status || '');
+  if (/cancel|abgesagt/i.test(status)) return null;
+  if (JUNK.test(p.name || '')) return null;
+  const cats = (p.categories || []).map((c) => c?.name).filter(Boolean);
+  const parents = (p.categories || []).map((c) => c?.parentCategory?.name).filter(Boolean);
+  const music = [...cats, ...parents].some((c) => /konzert|festival|musik|music/i.test(c));
+  const genres = cats.filter((c) => !/^(konzerte|festivals?|weitere konzerte|sonstige.*|musik)$/i.test(c));
+  const lat = Number(loc.geoLocation?.latitude);
+  const lon = Number(loc.geoLocation?.longitude);
+  const code = typeof loc.countryCode === 'string' ? loc.countryCode
+    : typeof loc.country === 'string' && loc.country.length === 2 ? loc.country : '';
+  const url = p.link || (p.url?.domain && p.url?.path ? `${p.url.domain}${p.url.path}` : null);
+  return {
+    id: `evm:${p.productId}`,
+    source: 'Eventim',
+    name: p.name || '',
+    url,
+    date: start ? start.slice(0, 10) : null,
+    time: start && /T\d\d:\d\d/.test(start) && !/T00:00/.test(start) ? start.slice(11, 19) : null,
+    dateTime: start && !Number.isNaN(Date.parse(start)) ? new Date(start).toISOString() : null,
+    status: /sold ?out|ausverkauft/i.test(status) ? 'offsale' : 'onsale',
+    venue: loc.name || '',
+    city: loc.city || '',
+    country: code.toUpperCase(),
+    countryName: code ? countryName({ countryCode: code.toUpperCase() }) : (typeof loc.country === 'string' ? loc.country : ''),
+    lat: Number.isFinite(lat) && loc.geoLocation ? lat : null,
+    lon: Number.isFinite(lon) && loc.geoLocation ? lon : null,
+    segment: music ? 'Music' : cats[0] || '',
+    genre: genres.join(' / '),
+    subGenre: '',
+    attractions: (p.attractions || []).filter((a) => a?.name).map((a) => ({ name: a.name, spotifyId: null, image: null })),
+    image: p.imageUrl || p.image?.url || p.images?.[0]?.url || null,
+    saleStart: null,
+    presales: [],
+    price: Number.isFinite(Number(p.price)) && Number(p.price) > 0 ? { min: Number(p.price), max: Number(p.price), currency: p.currency || 'EUR' } : null,
+  };
+}
+
+/** Ticket-Links eines Konzerts, auch für ältere Einträge mit nur einer url. */
+export function linksOf(ev) {
+  if (ev.links?.length) return ev.links;
+  return ev.url ? [{ source: ev.source || 'Ticketmaster', url: ev.url }] : [];
 }
 
 export function saleInfo(ev, now = Date.now()) {
@@ -301,12 +354,32 @@ export function classify(data, { home, places = [], travelKm = 1500, genres = nu
     out.push({ ...ev, section, score, artist, support, near, dHome, disc, isNew: isNew(ev, data, now), sale: saleInfo(ev, now) });
   }
 
-  const best = new Map();
-  const rank = (e) => (PACKAGE.test(e.name) ? 1000 : 0) + e.name.length;
+  // Dasselbe Konzert kann mehrfach auftauchen: als VIP-Paket oder bei Ticketmaster
+  // und Eventim zugleich. Gleicher Künstler, gleicher Tag, gleicher Ort (≤ 30 km
+  // oder gleiche Stadt) ist ein Konzert – mit allen Ticket-Links.
+  const groups = new Map();
   for (const ev of out) {
-    const k = `${ev.artist?.key || norm(ev.name)}|${ev.date}|${norm(ev.venue)}`;
-    const prev = best.get(k);
-    if (!prev || rank(ev) < rank(prev)) best.set(k, ev);
+    const who = `${ev.artist?.key || norm(ev.attractions[0]?.name || ev.name)}|${ev.date}`;
+    const list = groups.get(who) || [];
+    const same = list.find((g) => g.some((m) => (norm(m.city) && norm(m.city) === norm(ev.city))
+      || (m.lat != null && ev.lat != null && haversine(m, ev) <= 30)));
+    if (same) same.push(ev); else list.push([ev]);
+    groups.set(who, list);
   }
-  return [...best.values()];
+  const rank = (e) => (PACKAGE.test(e.name) ? 1000 : 0) + (e.source === 'Eventim' ? 100 : 0) + e.name.length;
+  const merged = [];
+  for (const list of groups.values()) {
+    for (const members of list) {
+      const best = members.reduce((a, b) => (rank(b) < rank(a) ? b : a));
+      const links = [];
+      for (const m of [best, ...members]) {
+        for (const l of linksOf(m)) if (!links.some((x) => x.source === l.source)) links.push(l);
+      }
+      const seen = Math.min(...members.map((m) => m.firstSeen || Infinity));
+      const ev = { ...best, links, firstSeen: Number.isFinite(seen) ? seen : best.firstSeen };
+      ev.isNew = isNew(ev, data, now);
+      merged.push(ev);
+    }
+  }
+  return merged;
 }
