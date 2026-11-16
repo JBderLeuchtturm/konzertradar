@@ -1,10 +1,12 @@
 {
   "statsfm": "janniktheninja",
   "home": { "name": "Idar-Oberstein", "lat": 49.7117, "lon": 7.3127, "radius": 150 },
-  "places": [],
+  "places": [
+    { "name": "Göteborg", "lat": 57.7089, "lon": 11.9746, "radius": 50 }
+  ],
   "travelKm": 1500,
   "monthsAhead": 12,
   "maxArtists": 60,
-  "artists": [],
+  "artists": ["Swedish House Mafia"],
   "notify": true
 }
